@@ -1,0 +1,38 @@
+{
+  "name": "scope",
+  "version": "1.0.0",
+  "description": "Safari Web Extension for visual DOM overlays and CSS font data inspection",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint \"scope Extension/Resources/**/*.js\" --no-error-on-unmatched-pattern",
+    "lint:fix": "eslint \"scope Extension/Resources/**/*.js\" --fix --no-error-on-unmatched-pattern",
+    "format": "prettier --write \"scope Extension/Resources/**/*.{js,json,css,html}\"",
+    "format:check": "prettier --check \"scope Extension/Resources/**/*.{js,json,css,html}\"",
+    "watch": "node scripts/watch.js",
+    "check": "npm run lint && npm run format:check",
+    "check:fix": "npm run lint:fix && npm run format"
+  },
+  "keywords": [
+    "safari",
+    "web-extension",
+    "browser-extension",
+    "dom",
+    "css",
+    "inspector"
+  ],
+  "author": "ordinarysh",
+  "license": "MIT",
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.0.0",
+    "globals": "^15.0.0",
+    "prettier": "^3.0.0",
+    "chokidar": "^4.0.0",
+    "cross-env": "^7.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
