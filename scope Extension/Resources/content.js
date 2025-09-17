@@ -2,13 +2,14 @@
   'use strict';
 
   // Constants
-  const HIGHLIGHT_CLASS = 'scope-element-highlight';
   const OVERLAY_ID = 'scope-overlay-indicator';
   const PADDING_OVERLAY_ID = 'scope-padding-overlay';
   const PADDING_OVERLAY_CLASS = 'scope-padding-overlay-part';
   const MARGIN_OVERLAY_ID = 'scope-margin-overlay';
   const MARGIN_OVERLAY_CLASS = 'scope-margin-overlay-part';
   const CONTENT_OVERLAY_ID = 'scope-content-overlay';
+  const REFERENCE_LINES_ID = 'scope-reference-lines';
+  const REFERENCE_LINE_CLASS = 'scope-reference-line';
 
   // Performance optimization: Debug mode toggle
   const DEBUG_MODE = false; // Set to true only during development
@@ -97,6 +98,15 @@
   };
   let contentOverlayElement = null;
 
+  // Reference lines elements
+  let referenceLinesContainer = null;
+  let referenceLinesElements = {
+    top: null,
+    bottom: null,
+    left: null,
+    right: null,
+  };
+
   // Performance optimization: mouseover throttling
   let updateScheduled = false;
   let pendingElement = null;
@@ -147,9 +157,25 @@
 
     styleElement = document.createElement('style');
     styleElement.textContent = `
-      .${HIGHLIGHT_CLASS} {
-        outline: 2px solid #ff4444 !important;
-        outline-offset: 1px !important;
+      #${REFERENCE_LINES_ID} {
+        position: fixed !important;
+        pointer-events: none !important;
+        z-index: 999999 !important;
+        display: none !important;
+      }
+
+      #${REFERENCE_LINES_ID}.visible {
+        display: block !important;
+      }
+
+      .${REFERENCE_LINE_CLASS} {
+        position: fixed !important;
+        background-color: #ff4444 !important;
+        pointer-events: none !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        z-index: 999999 !important;
       }
 
       #${OVERLAY_ID} {
@@ -307,6 +333,29 @@
     debugLog('[Scope] Content overlay created');
   }
 
+  // Create reference lines container and elements
+  function createReferenceLines() {
+    if (referenceLinesContainer) {
+      return; // Already created
+    }
+
+    // Create container
+    referenceLinesContainer = document.createElement('div');
+    referenceLinesContainer.id = REFERENCE_LINES_ID;
+
+    // Create individual line elements
+    ['top', 'bottom', 'left', 'right'].forEach(side => {
+      const line = document.createElement('div');
+      line.className = REFERENCE_LINE_CLASS;
+      line.setAttribute('data-line-side', side);
+      referenceLinesContainer.appendChild(line);
+      referenceLinesElements[side] = line;
+    });
+
+    document.body.appendChild(referenceLinesContainer);
+    debugLog('[Scope] Reference lines created');
+  }
+
   // Show overlay indicator
   function showOverlay() {
     if (overlayElement) {
@@ -365,6 +414,20 @@
     }
   }
 
+  // Show reference lines
+  function showReferenceLines() {
+    if (referenceLinesContainer) {
+      referenceLinesContainer.classList.add('visible');
+    }
+  }
+
+  // Hide reference lines
+  function hideReferenceLines() {
+    if (referenceLinesContainer) {
+      referenceLinesContainer.classList.remove('visible');
+    }
+  }
+
   // Remove overlay and CSS
   function cleanup() {
     if (overlayElement && overlayElement.parentNode) {
@@ -394,6 +457,16 @@
     if (contentOverlayElement && contentOverlayElement.parentNode) {
       contentOverlayElement.parentNode.removeChild(contentOverlayElement);
       contentOverlayElement = null;
+    }
+    if (referenceLinesContainer && referenceLinesContainer.parentNode) {
+      referenceLinesContainer.parentNode.removeChild(referenceLinesContainer);
+      referenceLinesContainer = null;
+      referenceLinesElements = {
+        top: null,
+        bottom: null,
+        left: null,
+        right: null,
+      };
     }
     if (styleElement && styleElement.parentNode) {
       styleElement.parentNode.removeChild(styleElement);
@@ -439,58 +512,6 @@
   }
 
   // Safe helper functions for handling classList operations
-  function safeAddClass(element, className) {
-    try {
-      if (element.classList) {
-        element.classList.add(className);
-      } else {
-        // Fallback using setAttribute for elements without classList
-        const currentClass = element.getAttribute('class') || '';
-        if (!currentClass.includes(className)) {
-          element.setAttribute(
-            'class',
-            currentClass ? `${currentClass} ${className}` : className
-          );
-        }
-      }
-    } catch (error) {
-      console.warn('[Scope] Error adding class:', error);
-    }
-  }
-
-  function safeRemoveClass(element, className) {
-    try {
-      if (element.classList) {
-        element.classList.remove(className);
-      } else {
-        // Fallback using setAttribute for elements without classList
-        const currentClass = element.getAttribute('class') || '';
-        const newClass = currentClass
-          .split(' ')
-          .filter(c => c !== className)
-          .join(' ');
-        element.setAttribute('class', newClass);
-      }
-    } catch (error) {
-      console.warn('[Scope] Error removing class:', error);
-    }
-  }
-
-  function safeHasClass(element, className) {
-    try {
-      if (element.classList) {
-        return element.classList.contains(className);
-      } else {
-        // Fallback using getAttribute for elements without classList
-        const currentClass = element.getAttribute('class') || '';
-        return currentClass.split(' ').includes(className);
-      }
-    } catch (error) {
-      console.warn('[Scope] Error checking class:', error);
-      return false;
-    }
-  }
-
   function safeGetClassName(element) {
     try {
       if (typeof element.className === 'string') {
@@ -505,6 +526,79 @@
     } catch (error) {
       console.warn('[Scope] Error getting className:', error);
       return '';
+    }
+  }
+
+  // Update reference lines to show Safari-style element boundaries
+  function updateReferenceLines(element) {
+    try {
+      if (
+        !element ||
+        !referenceLinesContainer ||
+        !isHighlightingEnabled ||
+        EXCLUDED_TAGS.includes(element.tagName)
+      ) {
+        return;
+      }
+
+      // Get cached element styles and rect for performance
+      const cached = getCachedStyles(element);
+      const { rect } = cached;
+
+      // Position top line (horizontal, extends full viewport width)
+      if (referenceLinesElements.top) {
+        batchDOMUpdate(referenceLinesElements.top, {
+          left: '0px',
+          top: `${rect.top}px`,
+          width: '100vw',
+          height: '1px',
+        });
+      }
+
+      // Position bottom line (horizontal, extends full viewport width)
+      if (referenceLinesElements.bottom) {
+        batchDOMUpdate(referenceLinesElements.bottom, {
+          left: '0px',
+          top: `${rect.top + rect.height}px`,
+          width: '100vw',
+          height: '1px',
+        });
+      }
+
+      // Position left line (vertical, extends full viewport height)
+      if (referenceLinesElements.left) {
+        batchDOMUpdate(referenceLinesElements.left, {
+          left: `${rect.left}px`,
+          top: '0px',
+          width: '1px',
+          height: '100vh',
+        });
+      }
+
+      // Position right line (vertical, extends full viewport height)
+      if (referenceLinesElements.right) {
+        batchDOMUpdate(referenceLinesElements.right, {
+          left: `${rect.left + rect.width}px`,
+          top: '0px',
+          width: '1px',
+          height: '100vh',
+        });
+      }
+
+      // Show the reference lines container
+      showReferenceLines();
+
+      debugLog('[Scope] Updated reference lines for element:', {
+        selector: getElementSelector(element),
+        bounds: {
+          top: rect.top,
+          bottom: rect.top + rect.height,
+          left: rect.left,
+          right: rect.left + rect.width,
+        },
+      });
+    } catch (error) {
+      console.error('[Scope] Error updating reference lines:', error);
     }
   }
 
@@ -801,7 +895,9 @@
       if (
         element.id === OVERLAY_ID ||
         element.id === PADDING_OVERLAY_ID ||
-        element.classList.contains(PADDING_OVERLAY_CLASS)
+        element.id === REFERENCE_LINES_ID ||
+        element.classList.contains(PADDING_OVERLAY_CLASS) ||
+        element.classList.contains(REFERENCE_LINE_CLASS)
       ) {
         return;
       }
@@ -812,26 +908,20 @@
         return;
       }
 
-      // Remove highlight from previous element
-      if (previousElement && previousElement !== element) {
-        safeRemoveClass(previousElement, HIGHLIGHT_CLASS);
-        debugLog(
-          '[Scope] Removed highlight from:',
-          getElementSelector(previousElement)
-        );
-      }
+      // Create reference lines if not already created
+      createReferenceLines();
 
-      // Add highlight to current element
-      if (!safeHasClass(element, HIGHLIGHT_CLASS)) {
-        safeAddClass(element, HIGHLIGHT_CLASS);
-        debugLog('[Scope] Highlighted element:', {
-          tag: element.tagName.toLowerCase(),
-          selector: getElementSelector(element),
-          id: element.id || '(no id)',
-          classes: safeGetClassName(element) || '(no classes)',
-          text: element.textContent?.substring(0, 50) || '(no text)',
-        });
-      }
+      // Log element being highlighted
+      debugLog('[Scope] Highlighted element:', {
+        tag: element.tagName.toLowerCase(),
+        selector: getElementSelector(element),
+        id: element.id || '(no id)',
+        classes: safeGetClassName(element) || '(no classes)',
+        text: element.textContent?.substring(0, 50) || '(no text)',
+      });
+
+      // Show reference lines for current element
+      updateReferenceLines(element);
 
       // Show padding visualization for current element
       updatePaddingOverlay(element);
@@ -853,8 +943,10 @@
     try {
       if (!element) return;
 
-      safeRemoveClass(element, HIGHLIGHT_CLASS);
       debugLog('[Scope] Removed highlight from:', getElementSelector(element));
+
+      // Hide reference lines
+      hideReferenceLines();
 
       // Hide padding overlay
       hidePaddingOverlay();
@@ -876,12 +968,8 @@
   // Remove all highlights from the page
   function removeAllHighlights() {
     try {
-      const highlightedElements = document.querySelectorAll(
-        `.${HIGHLIGHT_CLASS}`
-      );
-      highlightedElements.forEach(element => {
-        safeRemoveClass(element, HIGHLIGHT_CLASS);
-      });
+      // Hide reference lines
+      hideReferenceLines();
 
       // Hide padding overlay
       hidePaddingOverlay();
@@ -986,6 +1074,7 @@
     clearStyleCache();
 
     // Update all overlay positions for the current element
+    updateReferenceLines(previousElement);
     updatePaddingOverlay(previousElement);
     updateMarginOverlay(previousElement);
     updateContentOverlay(previousElement);
@@ -1002,6 +1091,7 @@
 
     // Update overlays if there's an active element
     if (previousElement) {
+      updateReferenceLines(previousElement);
       updatePaddingOverlay(previousElement);
       updateMarginOverlay(previousElement);
       updateContentOverlay(previousElement);
