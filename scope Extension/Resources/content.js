@@ -12,9 +12,20 @@
   const GAP_OVERLAY_CLASS = 'scope-gap-overlay-part';
   const REFERENCE_LINES_ID = 'scope-reference-lines';
   const REFERENCE_LINE_CLASS = 'scope-reference-line';
-  const REFERENCE_LINE_THICKNESS = Math.min(0.75, 1 / (window.devicePixelRatio || 1));
+  const REFERENCE_LINE_THICKNESS = Math.min(
+    0.75,
+    1 / (window.devicePixelRatio || 1)
+  );
   const REFERENCE_LINE_THICKNESS_PX = `${REFERENCE_LINE_THICKNESS}px`;
   const MAX_GAP_CHILDREN = 200;
+  const COLOR_PADDING = 'rgba(110, 228, 140, 0.4)';
+  const COLOR_MARGIN = 'rgba(255, 186, 86, 0.4)';
+  const COLOR_CONTENT = 'rgba(138, 196, 255, 0.35)';
+  const COLOR_GAP_SOLID = 'rgba(194, 84, 255, 0.4)';
+  const COLOR_GAP_STRIPE_DARK = 'rgba(194, 84, 255, 0.55)';
+  const COLOR_GAP_STRIPE_LIGHT = 'rgba(194, 84, 255, 0.25)';
+  const GAP_ALIGNMENT_THRESHOLD = 2;
+  const GAP_EPSILON = 0.5;
 
   // Performance optimization: Debug mode toggle
   const DEBUG_MODE = false; // Set to true only during development
@@ -105,13 +116,17 @@
   let gapOverlayContainer = null;
   let gapOverlayParts = [];
 
-  // Reference lines elements
+  // Reference lines elements - L-corner segments
   let referenceLinesContainer = null;
   let referenceLinesElements = {
-    top: null,
-    bottom: null,
-    left: null,
-    right: null,
+    topLeftHorizontal: null, // From viewport left edge TO element left
+    topLeftVertical: null, // From viewport top edge TO element top
+    topRightHorizontal: null, // From element right TO viewport right edge
+    topRightVertical: null, // From viewport top edge TO element top
+    bottomLeftHorizontal: null, // From viewport left edge TO element left
+    bottomLeftVertical: null, // From element bottom TO viewport bottom edge
+    bottomRightHorizontal: null, // From element right TO viewport right edge
+    bottomRightVertical: null, // From element bottom TO viewport bottom edge
   };
 
   // Performance optimization: mouseover throttling
@@ -240,7 +255,7 @@
 
       .${PADDING_OVERLAY_CLASS} {
         position: fixed !important;
-        background-color: rgba(76, 175, 80, 0.3) !important;
+        background-color: ${COLOR_PADDING} !important;
         pointer-events: none !important;
         border: none !important;
         margin: 0 !important;
@@ -261,7 +276,7 @@
 
       .${MARGIN_OVERLAY_CLASS} {
         position: fixed !important;
-        background-color: rgba(246, 178, 107, 0.3) !important;
+        background-color: ${COLOR_MARGIN} !important;
         pointer-events: none !important;
         border: none !important;
         margin: 0 !important;
@@ -271,7 +286,7 @@
 
       #${CONTENT_OVERLAY_ID} {
         position: fixed !important;
-        background-color: rgba(135, 171, 218, 0.3) !important;
+        background-color: ${COLOR_CONTENT} !important;
         pointer-events: none !important;
         border: none !important;
         margin: 0 !important;
@@ -302,13 +317,13 @@
         margin: 0 !important;
         padding: 0 !important;
         z-index: 999996 !important;
-        background-color: rgba(189, 47, 255, 0.35) !important;
+        background-color: ${COLOR_GAP_SOLID} !important;
         background-image: repeating-linear-gradient(
           135deg,
-          rgba(189, 47, 255, 0.5) 0px,
-          rgba(189, 47, 255, 0.5) 6px,
-          rgba(189, 47, 255, 0.2) 6px,
-          rgba(189, 47, 255, 0.2) 12px
+          ${COLOR_GAP_STRIPE_DARK} 0px,
+          ${COLOR_GAP_STRIPE_DARK} 6px,
+          ${COLOR_GAP_STRIPE_LIGHT} 6px,
+          ${COLOR_GAP_STRIPE_LIGHT} 12px
         ) !important;
       }
     `;
@@ -409,17 +424,28 @@
     referenceLinesContainer = document.createElement('div');
     referenceLinesContainer.id = REFERENCE_LINES_ID;
 
-    // Create individual line elements
-    ['top', 'bottom', 'left', 'right'].forEach(side => {
+    // Create L-corner line segments
+    const cornerSegments = [
+      'topLeftHorizontal',
+      'topLeftVertical',
+      'topRightHorizontal',
+      'topRightVertical',
+      'bottomLeftHorizontal',
+      'bottomLeftVertical',
+      'bottomRightHorizontal',
+      'bottomRightVertical',
+    ];
+
+    cornerSegments.forEach(segmentName => {
       const line = document.createElement('div');
       line.className = REFERENCE_LINE_CLASS;
-      line.setAttribute('data-line-side', side);
+      line.setAttribute('data-corner-segment', segmentName);
       referenceLinesContainer.appendChild(line);
-      referenceLinesElements[side] = line;
+      referenceLinesElements[segmentName] = line;
     });
 
     document.body.appendChild(referenceLinesContainer);
-    debugLog('[Scope] Reference lines created');
+    debugLog('[Scope] L-corner reference lines created');
   }
 
   // Show overlay indicator
@@ -552,10 +578,14 @@
       referenceLinesContainer.parentNode.removeChild(referenceLinesContainer);
       referenceLinesContainer = null;
       referenceLinesElements = {
-        top: null,
-        bottom: null,
-        left: null,
-        right: null,
+        topLeftHorizontal: null,
+        topLeftVertical: null,
+        topRightHorizontal: null,
+        topRightVertical: null,
+        bottomLeftHorizontal: null,
+        bottomLeftVertical: null,
+        bottomRightHorizontal: null,
+        bottomRightVertical: null,
       };
     }
     if (styleElement && styleElement.parentNode) {
@@ -619,7 +649,7 @@
     }
   }
 
-  // Update reference lines to show Safari-style element boundaries
+  // Update reference lines to show L-corner indicators extending to viewport edges
   function updateReferenceLines(element) {
     try {
       if (
@@ -635,57 +665,172 @@
       const cached = getCachedStyles(element);
       const { rect } = cached;
 
-      // Position top line (horizontal, extends full viewport width)
-      if (referenceLinesElements.top) {
-        batchDOMUpdate(referenceLinesElements.top, {
+      // Calculate element corner positions
+      const elementLeft = rect.left;
+      const elementTop = rect.top;
+      const elementRight = rect.left + rect.width;
+      const elementBottom = rect.top + rect.height;
+
+      // Get viewport dimensions
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+
+      // Top-Left Corner L
+      // Horizontal line: from viewport left edge TO element left edge
+      if (referenceLinesElements.topLeftHorizontal) {
+        const lineWidth = Math.max(0, elementLeft);
+        const isVisible =
+          elementTop >= -REFERENCE_LINE_THICKNESS &&
+          elementTop <= viewportHeight &&
+          lineWidth >= 0;
+
+        batchDOMUpdate(referenceLinesElements.topLeftHorizontal, {
           left: '0px',
-          top: `${rect.top}px`,
-          width: '100vw',
+          top: `${elementTop}px`,
+          width: `${lineWidth}px`,
           height: REFERENCE_LINE_THICKNESS_PX,
+          display: isVisible ? 'block' : 'none',
         });
       }
 
-      // Position bottom line (horizontal, extends full viewport width)
-      if (referenceLinesElements.bottom) {
-        batchDOMUpdate(referenceLinesElements.bottom, {
-          left: '0px',
-          top: `${rect.top + rect.height}px`,
-          width: '100vw',
-          height: REFERENCE_LINE_THICKNESS_PX,
-        });
-      }
+      // Vertical line: from viewport top edge TO element top edge
+      if (referenceLinesElements.topLeftVertical) {
+        const lineHeight = Math.max(0, elementTop);
+        const isVisible =
+          elementLeft >= -REFERENCE_LINE_THICKNESS &&
+          elementLeft <= viewportWidth &&
+          lineHeight >= 0;
 
-      // Position left line (vertical, extends full viewport height)
-      if (referenceLinesElements.left) {
-        batchDOMUpdate(referenceLinesElements.left, {
-          left: `${rect.left}px`,
+        batchDOMUpdate(referenceLinesElements.topLeftVertical, {
+          left: `${elementLeft}px`,
           top: '0px',
           width: REFERENCE_LINE_THICKNESS_PX,
-          height: '100vh',
+          height: `${lineHeight}px`,
+          display: isVisible ? 'block' : 'none',
         });
       }
 
-      // Position right line (vertical, extends full viewport height)
-      if (referenceLinesElements.right) {
-        batchDOMUpdate(referenceLinesElements.right, {
-          left: `${rect.left + rect.width}px`,
+      // Top-Right Corner L
+      // Horizontal line: from element right edge TO viewport right edge
+      if (referenceLinesElements.topRightHorizontal) {
+        const lineWidth = Math.max(0, viewportWidth - elementRight);
+        const isVisible =
+          elementTop >= -REFERENCE_LINE_THICKNESS &&
+          elementTop <= viewportHeight &&
+          elementRight <= viewportWidth + REFERENCE_LINE_THICKNESS &&
+          lineWidth >= 0;
+
+        batchDOMUpdate(referenceLinesElements.topRightHorizontal, {
+          left: `${elementRight}px`,
+          top: `${elementTop}px`,
+          width: `${lineWidth}px`,
+          height: REFERENCE_LINE_THICKNESS_PX,
+          display: isVisible ? 'block' : 'none',
+        });
+      }
+
+      // Vertical line: from viewport top edge TO element top edge
+      if (referenceLinesElements.topRightVertical) {
+        const lineHeight = Math.max(0, elementTop);
+        const isVisible =
+          elementRight >= -REFERENCE_LINE_THICKNESS &&
+          elementRight <= viewportWidth + REFERENCE_LINE_THICKNESS &&
+          lineHeight >= 0;
+
+        batchDOMUpdate(referenceLinesElements.topRightVertical, {
+          left: `${elementRight}px`,
           top: '0px',
           width: REFERENCE_LINE_THICKNESS_PX,
-          height: '100vh',
+          height: `${lineHeight}px`,
+          display: isVisible ? 'block' : 'none',
+        });
+      }
+
+      // Bottom-Left Corner L
+      // Horizontal line: from viewport left edge TO element left edge
+      if (referenceLinesElements.bottomLeftHorizontal) {
+        const lineWidth = Math.max(0, elementLeft);
+        const isVisible =
+          elementBottom >= -REFERENCE_LINE_THICKNESS &&
+          elementBottom <= viewportHeight + REFERENCE_LINE_THICKNESS &&
+          lineWidth >= 0;
+
+        batchDOMUpdate(referenceLinesElements.bottomLeftHorizontal, {
+          left: '0px',
+          top: `${elementBottom}px`,
+          width: `${lineWidth}px`,
+          height: REFERENCE_LINE_THICKNESS_PX,
+          display: isVisible ? 'block' : 'none',
+        });
+      }
+
+      // Vertical line: from element bottom edge TO viewport bottom edge
+      if (referenceLinesElements.bottomLeftVertical) {
+        const lineHeight = Math.max(0, viewportHeight - elementBottom);
+        const isVisible =
+          elementLeft >= -REFERENCE_LINE_THICKNESS &&
+          elementLeft <= viewportWidth &&
+          elementBottom <= viewportHeight + REFERENCE_LINE_THICKNESS &&
+          lineHeight >= 0;
+
+        batchDOMUpdate(referenceLinesElements.bottomLeftVertical, {
+          left: `${elementLeft}px`,
+          top: `${elementBottom}px`,
+          width: REFERENCE_LINE_THICKNESS_PX,
+          height: `${lineHeight}px`,
+          display: isVisible ? 'block' : 'none',
+        });
+      }
+
+      // Bottom-Right Corner L
+      // Horizontal line: from element right edge TO viewport right edge
+      if (referenceLinesElements.bottomRightHorizontal) {
+        const lineWidth = Math.max(0, viewportWidth - elementRight);
+        const isVisible =
+          elementBottom >= -REFERENCE_LINE_THICKNESS &&
+          elementBottom <= viewportHeight + REFERENCE_LINE_THICKNESS &&
+          elementRight <= viewportWidth + REFERENCE_LINE_THICKNESS &&
+          lineWidth >= 0;
+
+        batchDOMUpdate(referenceLinesElements.bottomRightHorizontal, {
+          left: `${elementRight}px`,
+          top: `${elementBottom}px`,
+          width: `${lineWidth}px`,
+          height: REFERENCE_LINE_THICKNESS_PX,
+          display: isVisible ? 'block' : 'none',
+        });
+      }
+
+      // Vertical line: from element bottom edge TO viewport bottom edge
+      if (referenceLinesElements.bottomRightVertical) {
+        const lineHeight = Math.max(0, viewportHeight - elementBottom);
+        const isVisible =
+          elementRight >= -REFERENCE_LINE_THICKNESS &&
+          elementRight <= viewportWidth + REFERENCE_LINE_THICKNESS &&
+          elementBottom <= viewportHeight + REFERENCE_LINE_THICKNESS &&
+          lineHeight >= 0;
+
+        batchDOMUpdate(referenceLinesElements.bottomRightVertical, {
+          left: `${elementRight}px`,
+          top: `${elementBottom}px`,
+          width: REFERENCE_LINE_THICKNESS_PX,
+          height: `${lineHeight}px`,
+          display: isVisible ? 'block' : 'none',
         });
       }
 
       // Show the reference lines container
       showReferenceLines();
 
-      debugLog('[Scope] Updated reference lines for element:', {
+      debugLog('[Scope] Updated L-corner reference lines for element:', {
         selector: getElementSelector(element),
-        bounds: {
-          top: rect.top,
-          bottom: rect.top + rect.height,
-          left: rect.left,
-          right: rect.left + rect.width,
+        corners: {
+          topLeft: [elementLeft, elementTop],
+          topRight: [elementRight, elementTop],
+          bottomLeft: [elementLeft, elementBottom],
+          bottomRight: [elementRight, elementBottom],
         },
+        viewport: { width: viewportWidth, height: viewportHeight },
       });
     } catch (error) {
       console.error('[Scope] Error updating reference lines:', error);
@@ -983,6 +1128,51 @@
     }
   }
 
+  function groupRectsByAxis(rects, axis) {
+    const useRowAxis = axis === 'row';
+    const sorted = rects
+      .slice()
+      .sort((a, b) => (useRowAxis ? a.top - b.top : a.left - b.left));
+
+    const groups = [];
+
+    for (const rect of sorted) {
+      const value = useRowAxis ? rect.top : rect.left;
+      let targetGroup = null;
+
+      for (const group of groups) {
+        const delta = Math.abs(value - group.reference);
+        if (delta <= GAP_ALIGNMENT_THRESHOLD) {
+          targetGroup = group;
+          break;
+        }
+      }
+
+      if (!targetGroup) {
+        targetGroup = {
+          rects: [],
+          minLeft: rect.left,
+          maxRight: rect.right,
+          minTop: rect.top,
+          maxBottom: rect.bottom,
+          reference: value,
+        };
+        groups.push(targetGroup);
+      }
+
+      targetGroup.rects.push(rect);
+      targetGroup.minLeft = Math.min(targetGroup.minLeft, rect.left);
+      targetGroup.maxRight = Math.max(targetGroup.maxRight, rect.right);
+      targetGroup.minTop = Math.min(targetGroup.minTop, rect.top);
+      targetGroup.maxBottom = Math.max(targetGroup.maxBottom, rect.bottom);
+      targetGroup.reference =
+        (targetGroup.reference * (targetGroup.rects.length - 1) + value) /
+        targetGroup.rects.length;
+    }
+
+    return groups;
+  }
+
   function computeGapRectangles(element, containerRect, layout) {
     const results = [];
 
@@ -991,8 +1181,8 @@
     }
 
     const { rowGap = 0, columnGap = 0 } = layout;
-    const hasRowGap = rowGap > 0;
-    const hasColumnGap = columnGap > 0;
+    const hasRowGap = rowGap > GAP_EPSILON;
+    const hasColumnGap = columnGap > GAP_EPSILON;
 
     if (!hasRowGap && !hasColumnGap) {
       return results;
@@ -1038,35 +1228,37 @@
 
     const containerRight = containerRect.left + containerRect.width;
     const containerBottom = containerRect.top + containerRect.height;
-    const EPSILON = 0.5;
 
     if (hasColumnGap) {
-      const sortedByX = childRects.slice().sort((a, b) => a.left - b.left);
+      const columnGroups = groupRectsByAxis(childRects, 'column').sort(
+        (a, b) => a.minLeft - b.minLeft
+      );
 
-      for (let index = 1; index < sortedByX.length; index += 1) {
-        const prevRect = sortedByX[index - 1];
-        const currRect = sortedByX[index];
-        const spaceWidth = currRect.left - prevRect.right;
+      for (let index = 1; index < columnGroups.length; index += 1) {
+        const prev = columnGroups[index - 1];
+        const curr = columnGroups[index];
+        const spaceWidth = curr.minLeft - prev.maxRight;
 
-        if (spaceWidth <= EPSILON) {
+        if (spaceWidth <= GAP_EPSILON) {
           continue;
         }
 
-        const overlapTop = Math.max(prevRect.top, currRect.top);
-        const overlapBottom = Math.min(prevRect.bottom, currRect.bottom);
+        const overlapTop = Math.max(prev.minTop, curr.minTop);
+        const overlapBottom = Math.min(prev.maxBottom, curr.maxBottom);
         const verticalOverlap = overlapBottom - overlapTop;
 
-        if (verticalOverlap <= EPSILON) {
+        if (verticalOverlap <= GAP_EPSILON) {
           continue;
         }
 
         const targetWidth = Math.min(columnGap, spaceWidth);
-        const centeredLeft = prevRect.right + Math.max((spaceWidth - targetWidth) / 2, 0);
+        const centeredLeft =
+          prev.maxRight + Math.max((spaceWidth - targetWidth) / 2, 0);
         const left = Math.max(containerRect.left, centeredLeft);
-        const right = Math.min(containerRight, centeredLeft + targetWidth);
+        const right = Math.min(containerRight, left + targetWidth);
         const width = right - left;
 
-        if (width <= EPSILON) {
+        if (width <= GAP_EPSILON) {
           continue;
         }
 
@@ -1074,7 +1266,7 @@
         const bottom = Math.min(containerBottom, overlapBottom);
         const height = bottom - top;
 
-        if (height <= EPSILON) {
+        if (height <= GAP_EPSILON) {
           continue;
         }
 
@@ -1083,32 +1275,35 @@
     }
 
     if (hasRowGap) {
-      const sortedByY = childRects.slice().sort((a, b) => a.top - b.top);
+      const rowGroups = groupRectsByAxis(childRects, 'row').sort(
+        (a, b) => a.minTop - b.minTop
+      );
 
-      for (let index = 1; index < sortedByY.length; index += 1) {
-        const prevRect = sortedByY[index - 1];
-        const currRect = sortedByY[index];
-        const spaceHeight = currRect.top - prevRect.bottom;
+      for (let index = 1; index < rowGroups.length; index += 1) {
+        const prev = rowGroups[index - 1];
+        const curr = rowGroups[index];
+        const spaceHeight = curr.minTop - prev.maxBottom;
 
-        if (spaceHeight <= EPSILON) {
+        if (spaceHeight <= GAP_EPSILON) {
           continue;
         }
 
-        const overlapLeft = Math.max(prevRect.left, currRect.left);
-        const overlapRight = Math.min(prevRect.right, currRect.right);
+        const overlapLeft = Math.max(prev.minLeft, curr.minLeft);
+        const overlapRight = Math.min(prev.maxRight, curr.maxRight);
         const horizontalOverlap = overlapRight - overlapLeft;
 
-        if (horizontalOverlap <= EPSILON) {
+        if (horizontalOverlap <= GAP_EPSILON) {
           continue;
         }
 
         const targetHeight = Math.min(rowGap, spaceHeight);
-        const centeredTop = prevRect.bottom + Math.max((spaceHeight - targetHeight) / 2, 0);
+        const centeredTop =
+          prev.maxBottom + Math.max((spaceHeight - targetHeight) / 2, 0);
         const top = Math.max(containerRect.top, centeredTop);
-        const bottom = Math.min(containerBottom, centeredTop + targetHeight);
+        const bottom = Math.min(containerBottom, top + targetHeight);
         const height = bottom - top;
 
-        if (height <= EPSILON) {
+        if (height <= GAP_EPSILON) {
           continue;
         }
 
@@ -1116,7 +1311,7 @@
         const right = Math.min(containerRight, overlapRight);
         const width = right - left;
 
-        if (width <= EPSILON) {
+        if (width <= GAP_EPSILON) {
           continue;
         }
 
@@ -1179,7 +1374,11 @@
         });
       });
 
-      for (let index = gapRects.length; index < gapOverlayParts.length; index += 1) {
+      for (
+        let index = gapRects.length;
+        index < gapOverlayParts.length;
+        index += 1
+      ) {
         const part = gapOverlayParts[index];
         if (part) {
           batchDOMUpdate(part, { display: 'none' });
