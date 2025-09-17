@@ -9,6 +9,52 @@
   const MARGIN_OVERLAY_ID = 'scope-margin-overlay';
   const MARGIN_OVERLAY_CLASS = 'scope-margin-overlay-part';
   const CONTENT_OVERLAY_ID = 'scope-content-overlay';
+
+  // Performance optimization: Debug mode toggle
+  const DEBUG_MODE = false; // Set to true only during development
+
+  // Debug logging function
+  function debugLog(...args) {
+    if (DEBUG_MODE) {
+      console.log(...args);
+    }
+  }
+
+  // DOM update batching system for 60fps performance
+  const domUpdateQueue = new Map();
+  let rafScheduled = false;
+
+  function batchDOMUpdate(element, updates) {
+    if (!domUpdateQueue.has(element)) {
+      domUpdateQueue.set(element, {});
+    }
+
+    // Merge new updates with existing ones for this element
+    Object.assign(domUpdateQueue.get(element), updates);
+
+    if (!rafScheduled) {
+      rafScheduled = true;
+      requestAnimationFrame(applyBatchedUpdates);
+    }
+  }
+
+  function applyBatchedUpdates() {
+    for (const [element, updates] of domUpdateQueue) {
+      for (const [property, value] of Object.entries(updates)) {
+        if (property === 'className') {
+          element.className = value;
+        } else if (property === 'display') {
+          element.style.display = value;
+        } else {
+          element.style[property] = value;
+        }
+      }
+    }
+
+    domUpdateQueue.clear();
+    rafScheduled = false;
+  }
+
   const EXCLUDED_TAGS = [
     'HTML',
     'BODY',
@@ -50,6 +96,48 @@
     left: null,
   };
   let contentOverlayElement = null;
+
+  // Performance optimization: mouseover throttling
+  let updateScheduled = false;
+  let pendingElement = null;
+
+  // Performance optimization: cached styles
+  let cachedStyles = new WeakMap();
+
+  // Get cached computed styles and rect for element
+  function getCachedStyles(element) {
+    if (!cachedStyles.has(element)) {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+
+      cachedStyles.set(element, {
+        rect: {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        },
+        padding: {
+          top: parseFloat(style.paddingTop) || 0,
+          right: parseFloat(style.paddingRight) || 0,
+          bottom: parseFloat(style.paddingBottom) || 0,
+          left: parseFloat(style.paddingLeft) || 0,
+        },
+        margin: {
+          top: parseFloat(style.marginTop) || 0,
+          right: parseFloat(style.marginRight) || 0,
+          bottom: parseFloat(style.marginBottom) || 0,
+          left: parseFloat(style.marginLeft) || 0,
+        },
+      });
+    }
+    return cachedStyles.get(element);
+  }
+
+  // Clear cached styles (called on scroll/resize)
+  function clearStyleCache() {
+    cachedStyles = new WeakMap();
+  }
 
   // Inject CSS for highlighting and overlay
   function injectCSS() {
@@ -146,7 +234,7 @@
       }
     `;
     document.head.appendChild(styleElement);
-    console.log('[Scope] CSS injected');
+    debugLog('[Scope] CSS injected');
   }
 
   // Create overlay indicator
@@ -159,7 +247,7 @@
     overlayElement.id = OVERLAY_ID;
     overlayElement.textContent = 'SCOPE';
     document.body.appendChild(overlayElement);
-    console.log('[Scope] Overlay indicator created');
+    debugLog('[Scope] Overlay indicator created');
   }
 
   // Create padding overlay container and parts
@@ -181,7 +269,7 @@
     });
 
     document.body.appendChild(paddingOverlayContainer);
-    console.log('[Scope] Padding overlay created');
+    debugLog('[Scope] Padding overlay created');
   }
 
   // Create margin overlay container and parts
@@ -203,7 +291,7 @@
     });
 
     document.body.appendChild(marginOverlayContainer);
-    console.log('[Scope] Margin overlay created');
+    debugLog('[Scope] Margin overlay created');
   }
 
   // Create content overlay element
@@ -216,14 +304,14 @@
     contentOverlayElement.id = CONTENT_OVERLAY_ID;
 
     document.body.appendChild(contentOverlayElement);
-    console.log('[Scope] Content overlay created');
+    debugLog('[Scope] Content overlay created');
   }
 
   // Show overlay indicator
   function showOverlay() {
     if (overlayElement) {
       overlayElement.classList.add('visible');
-      console.log('[Scope] Overlay indicator shown');
+      debugLog('[Scope] Overlay indicator shown');
     }
   }
 
@@ -231,7 +319,7 @@
   function hideOverlay() {
     if (overlayElement) {
       overlayElement.classList.remove('visible');
-      console.log('[Scope] Overlay indicator hidden');
+      debugLog('[Scope] Overlay indicator hidden');
     }
   }
 
@@ -311,7 +399,7 @@
       styleElement.parentNode.removeChild(styleElement);
       styleElement = null;
     }
-    console.log('[Scope] Cleaned up overlay and CSS');
+    debugLog('[Scope] Cleaned up overlay and CSS');
   }
 
   // Get element selector for debugging
@@ -432,15 +520,15 @@
         return;
       }
 
-      // Get element's bounding rectangle and computed styles
-      const rect = element.getBoundingClientRect();
-      const computedStyle = window.getComputedStyle(element);
-
-      // Parse padding values
-      const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
-      const paddingRight = parseFloat(computedStyle.paddingRight) || 0;
-      const paddingBottom = parseFloat(computedStyle.paddingBottom) || 0;
-      const paddingLeft = parseFloat(computedStyle.paddingLeft) || 0;
+      // Get cached element styles and rect for performance
+      const cached = getCachedStyles(element);
+      const { rect, padding } = cached;
+      const {
+        top: paddingTop,
+        right: paddingRight,
+        bottom: paddingBottom,
+        left: paddingLeft,
+      } = padding;
 
       // Skip if element has no padding
       if (
@@ -461,52 +549,60 @@
 
       // Position top padding
       if (paddingTop > 0 && paddingOverlayParts.top) {
-        paddingOverlayParts.top.style.left = `${elementLeft}px`;
-        paddingOverlayParts.top.style.top = `${elementTop}px`;
-        paddingOverlayParts.top.style.width = `${elementWidth}px`;
-        paddingOverlayParts.top.style.height = `${paddingTop}px`;
-        paddingOverlayParts.top.style.display = 'block';
+        batchDOMUpdate(paddingOverlayParts.top, {
+          left: `${elementLeft}px`,
+          top: `${elementTop}px`,
+          width: `${elementWidth}px`,
+          height: `${paddingTop}px`,
+          display: 'block',
+        });
       } else if (paddingOverlayParts.top) {
-        paddingOverlayParts.top.style.display = 'none';
+        batchDOMUpdate(paddingOverlayParts.top, { display: 'none' });
       }
 
       // Position right padding
       if (paddingRight > 0 && paddingOverlayParts.right) {
-        paddingOverlayParts.right.style.left = `${elementLeft + elementWidth - paddingRight}px`;
-        paddingOverlayParts.right.style.top = `${elementTop + paddingTop}px`;
-        paddingOverlayParts.right.style.width = `${paddingRight}px`;
-        paddingOverlayParts.right.style.height = `${elementHeight - paddingTop - paddingBottom}px`;
-        paddingOverlayParts.right.style.display = 'block';
+        batchDOMUpdate(paddingOverlayParts.right, {
+          left: `${elementLeft + elementWidth - paddingRight}px`,
+          top: `${elementTop + paddingTop}px`,
+          width: `${paddingRight}px`,
+          height: `${elementHeight - paddingTop - paddingBottom}px`,
+          display: 'block',
+        });
       } else if (paddingOverlayParts.right) {
-        paddingOverlayParts.right.style.display = 'none';
+        batchDOMUpdate(paddingOverlayParts.right, { display: 'none' });
       }
 
       // Position bottom padding
       if (paddingBottom > 0 && paddingOverlayParts.bottom) {
-        paddingOverlayParts.bottom.style.left = `${elementLeft}px`;
-        paddingOverlayParts.bottom.style.top = `${elementTop + elementHeight - paddingBottom}px`;
-        paddingOverlayParts.bottom.style.width = `${elementWidth}px`;
-        paddingOverlayParts.bottom.style.height = `${paddingBottom}px`;
-        paddingOverlayParts.bottom.style.display = 'block';
+        batchDOMUpdate(paddingOverlayParts.bottom, {
+          left: `${elementLeft}px`,
+          top: `${elementTop + elementHeight - paddingBottom}px`,
+          width: `${elementWidth}px`,
+          height: `${paddingBottom}px`,
+          display: 'block',
+        });
       } else if (paddingOverlayParts.bottom) {
-        paddingOverlayParts.bottom.style.display = 'none';
+        batchDOMUpdate(paddingOverlayParts.bottom, { display: 'none' });
       }
 
       // Position left padding
       if (paddingLeft > 0 && paddingOverlayParts.left) {
-        paddingOverlayParts.left.style.left = `${elementLeft}px`;
-        paddingOverlayParts.left.style.top = `${elementTop + paddingTop}px`;
-        paddingOverlayParts.left.style.width = `${paddingLeft}px`;
-        paddingOverlayParts.left.style.height = `${elementHeight - paddingTop - paddingBottom}px`;
-        paddingOverlayParts.left.style.display = 'block';
+        batchDOMUpdate(paddingOverlayParts.left, {
+          left: `${elementLeft}px`,
+          top: `${elementTop + paddingTop}px`,
+          width: `${paddingLeft}px`,
+          height: `${elementHeight - paddingTop - paddingBottom}px`,
+          display: 'block',
+        });
       } else if (paddingOverlayParts.left) {
-        paddingOverlayParts.left.style.display = 'none';
+        batchDOMUpdate(paddingOverlayParts.left, { display: 'none' });
       }
 
       // Show the overlay container
       showPaddingOverlay();
 
-      console.log('[Scope] Updated padding overlay for element:', {
+      debugLog('[Scope] Updated padding overlay for element:', {
         selector: getElementSelector(element),
         padding: {
           top: paddingTop,
@@ -533,15 +629,15 @@
         return;
       }
 
-      // Get element's bounding rectangle and computed styles
-      const rect = element.getBoundingClientRect();
-      const computedStyle = window.getComputedStyle(element);
-
-      // Parse margin values
-      const marginTop = parseFloat(computedStyle.marginTop) || 0;
-      const marginRight = parseFloat(computedStyle.marginRight) || 0;
-      const marginBottom = parseFloat(computedStyle.marginBottom) || 0;
-      const marginLeft = parseFloat(computedStyle.marginLeft) || 0;
+      // Get cached element styles and rect for performance
+      const cached = getCachedStyles(element);
+      const { rect, margin } = cached;
+      const {
+        top: marginTop,
+        right: marginRight,
+        bottom: marginBottom,
+        left: marginLeft,
+      } = margin;
 
       // Skip if element has no margin
       if (
@@ -562,52 +658,60 @@
 
       // Position top margin (above element)
       if (marginTop > 0 && marginOverlayParts.top) {
-        marginOverlayParts.top.style.left = `${elementLeft - marginLeft}px`;
-        marginOverlayParts.top.style.top = `${elementTop - marginTop}px`;
-        marginOverlayParts.top.style.width = `${elementWidth + marginLeft + marginRight}px`;
-        marginOverlayParts.top.style.height = `${marginTop}px`;
-        marginOverlayParts.top.style.display = 'block';
+        batchDOMUpdate(marginOverlayParts.top, {
+          left: `${elementLeft - marginLeft}px`,
+          top: `${elementTop - marginTop}px`,
+          width: `${elementWidth + marginLeft + marginRight}px`,
+          height: `${marginTop}px`,
+          display: 'block',
+        });
       } else if (marginOverlayParts.top) {
-        marginOverlayParts.top.style.display = 'none';
+        batchDOMUpdate(marginOverlayParts.top, { display: 'none' });
       }
 
       // Position right margin (to the right of element)
       if (marginRight > 0 && marginOverlayParts.right) {
-        marginOverlayParts.right.style.left = `${elementLeft + elementWidth}px`;
-        marginOverlayParts.right.style.top = `${elementTop}px`;
-        marginOverlayParts.right.style.width = `${marginRight}px`;
-        marginOverlayParts.right.style.height = `${elementHeight}px`;
-        marginOverlayParts.right.style.display = 'block';
+        batchDOMUpdate(marginOverlayParts.right, {
+          left: `${elementLeft + elementWidth}px`,
+          top: `${elementTop}px`,
+          width: `${marginRight}px`,
+          height: `${elementHeight}px`,
+          display: 'block',
+        });
       } else if (marginOverlayParts.right) {
-        marginOverlayParts.right.style.display = 'none';
+        batchDOMUpdate(marginOverlayParts.right, { display: 'none' });
       }
 
       // Position bottom margin (below element)
       if (marginBottom > 0 && marginOverlayParts.bottom) {
-        marginOverlayParts.bottom.style.left = `${elementLeft - marginLeft}px`;
-        marginOverlayParts.bottom.style.top = `${elementTop + elementHeight}px`;
-        marginOverlayParts.bottom.style.width = `${elementWidth + marginLeft + marginRight}px`;
-        marginOverlayParts.bottom.style.height = `${marginBottom}px`;
-        marginOverlayParts.bottom.style.display = 'block';
+        batchDOMUpdate(marginOverlayParts.bottom, {
+          left: `${elementLeft - marginLeft}px`,
+          top: `${elementTop + elementHeight}px`,
+          width: `${elementWidth + marginLeft + marginRight}px`,
+          height: `${marginBottom}px`,
+          display: 'block',
+        });
       } else if (marginOverlayParts.bottom) {
-        marginOverlayParts.bottom.style.display = 'none';
+        batchDOMUpdate(marginOverlayParts.bottom, { display: 'none' });
       }
 
       // Position left margin (to the left of element)
       if (marginLeft > 0 && marginOverlayParts.left) {
-        marginOverlayParts.left.style.left = `${elementLeft - marginLeft}px`;
-        marginOverlayParts.left.style.top = `${elementTop}px`;
-        marginOverlayParts.left.style.width = `${marginLeft}px`;
-        marginOverlayParts.left.style.height = `${elementHeight}px`;
-        marginOverlayParts.left.style.display = 'block';
+        batchDOMUpdate(marginOverlayParts.left, {
+          left: `${elementLeft - marginLeft}px`,
+          top: `${elementTop}px`,
+          width: `${marginLeft}px`,
+          height: `${elementHeight}px`,
+          display: 'block',
+        });
       } else if (marginOverlayParts.left) {
-        marginOverlayParts.left.style.display = 'none';
+        batchDOMUpdate(marginOverlayParts.left, { display: 'none' });
       }
 
       // Show the overlay container
       showMarginOverlay();
 
-      console.log('[Scope] Updated margin overlay for element:', {
+      debugLog('[Scope] Updated margin overlay for element:', {
         selector: getElementSelector(element),
         margin: {
           top: marginTop,
@@ -634,15 +738,15 @@
         return;
       }
 
-      // Get element's bounding rectangle and computed styles
-      const rect = element.getBoundingClientRect();
-      const computedStyle = window.getComputedStyle(element);
-
-      // Parse padding values
-      const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
-      const paddingRight = parseFloat(computedStyle.paddingRight) || 0;
-      const paddingBottom = parseFloat(computedStyle.paddingBottom) || 0;
-      const paddingLeft = parseFloat(computedStyle.paddingLeft) || 0;
+      // Get cached element styles and rect for performance
+      const cached = getCachedStyles(element);
+      const { rect, padding } = cached;
+      const {
+        top: paddingTop,
+        right: paddingRight,
+        bottom: paddingBottom,
+        left: paddingLeft,
+      } = padding;
 
       // Calculate content area (inside padding)
       const contentLeft = rect.left + paddingLeft;
@@ -657,15 +761,17 @@
       }
 
       // Position content overlay
-      contentOverlayElement.style.left = `${contentLeft}px`;
-      contentOverlayElement.style.top = `${contentTop}px`;
-      contentOverlayElement.style.width = `${contentWidth}px`;
-      contentOverlayElement.style.height = `${contentHeight}px`;
+      batchDOMUpdate(contentOverlayElement, {
+        left: `${contentLeft}px`,
+        top: `${contentTop}px`,
+        width: `${contentWidth}px`,
+        height: `${contentHeight}px`,
+      });
 
       // Show the overlay
       showContentOverlay();
 
-      console.log('[Scope] Updated content overlay for element:', {
+      debugLog('[Scope] Updated content overlay for element:', {
         selector: getElementSelector(element),
         content: {
           left: contentLeft,
@@ -709,7 +815,7 @@
       // Remove highlight from previous element
       if (previousElement && previousElement !== element) {
         safeRemoveClass(previousElement, HIGHLIGHT_CLASS);
-        console.log(
+        debugLog(
           '[Scope] Removed highlight from:',
           getElementSelector(previousElement)
         );
@@ -718,7 +824,7 @@
       // Add highlight to current element
       if (!safeHasClass(element, HIGHLIGHT_CLASS)) {
         safeAddClass(element, HIGHLIGHT_CLASS);
-        console.log('[Scope] Highlighted element:', {
+        debugLog('[Scope] Highlighted element:', {
           tag: element.tagName.toLowerCase(),
           selector: getElementSelector(element),
           id: element.id || '(no id)',
@@ -748,10 +854,7 @@
       if (!element) return;
 
       safeRemoveClass(element, HIGHLIGHT_CLASS);
-      console.log(
-        '[Scope] Removed highlight from:',
-        getElementSelector(element)
-      );
+      debugLog('[Scope] Removed highlight from:', getElementSelector(element));
 
       // Hide padding overlay
       hidePaddingOverlay();
@@ -813,7 +916,18 @@
       return;
     }
 
-    highlightElement(element);
+    // Performance optimization: throttle highlighting with requestAnimationFrame
+    pendingElement = element;
+
+    if (!updateScheduled) {
+      updateScheduled = true;
+      requestAnimationFrame(() => {
+        if (pendingElement && isHighlightingEnabled) {
+          highlightElement(pendingElement);
+        }
+        updateScheduled = false;
+      });
+    }
   }
 
   function handleMouseOut(event) {
@@ -862,6 +976,38 @@
     }
   }
 
+  // Handle scroll to update overlay positions
+  function handleScroll() {
+    if (!isHighlightingEnabled || !previousElement) {
+      return;
+    }
+
+    // Clear cached styles since element positions have changed
+    clearStyleCache();
+
+    // Update all overlay positions for the current element
+    updatePaddingOverlay(previousElement);
+    updateMarginOverlay(previousElement);
+    updateContentOverlay(previousElement);
+  }
+
+  // Handle resize to invalidate cached styles
+  function handleResize() {
+    if (!isHighlightingEnabled) {
+      return;
+    }
+
+    // Clear cached styles since element positions may have changed
+    clearStyleCache();
+
+    // Update overlays if there's an active element
+    if (previousElement) {
+      updatePaddingOverlay(previousElement);
+      updateMarginOverlay(previousElement);
+      updateContentOverlay(previousElement);
+    }
+  }
+
   // Attach event listeners
   function attachEventListeners() {
     if (eventListenersAttached) return;
@@ -869,6 +1015,8 @@
     document.addEventListener('mouseover', handleMouseOver, true);
     document.addEventListener('mouseout', handleMouseOut, true);
     document.addEventListener('click', handleClick, true);
+    document.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleResize, true);
 
     eventListenersAttached = true;
     console.log('[Scope] Event listeners attached');
@@ -881,6 +1029,8 @@
     document.removeEventListener('mouseover', handleMouseOver, true);
     document.removeEventListener('mouseout', handleMouseOut, true);
     document.removeEventListener('click', handleClick, true);
+    document.removeEventListener('scroll', handleScroll, true);
+    window.removeEventListener('resize', handleResize, true);
 
     eventListenersAttached = false;
     console.log('[Scope] Event listeners removed');
