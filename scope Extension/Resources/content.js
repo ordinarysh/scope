@@ -6,6 +6,9 @@
   const OVERLAY_ID = 'scope-overlay-indicator';
   const PADDING_OVERLAY_ID = 'scope-padding-overlay';
   const PADDING_OVERLAY_CLASS = 'scope-padding-overlay-part';
+  const MARGIN_OVERLAY_ID = 'scope-margin-overlay';
+  const MARGIN_OVERLAY_CLASS = 'scope-margin-overlay-part';
+  const CONTENT_OVERLAY_ID = 'scope-content-overlay';
   const EXCLUDED_TAGS = [
     'HTML',
     'BODY',
@@ -39,6 +42,14 @@
     bottom: null,
     left: null,
   };
+  let marginOverlayContainer = null;
+  let marginOverlayParts = {
+    top: null,
+    right: null,
+    bottom: null,
+    left: null,
+  };
+  let contentOverlayElement = null;
 
   // Inject CSS for highlighting and overlay
   function injectCSS() {
@@ -97,6 +108,42 @@
         padding: 0 !important;
         z-index: 999997 !important;
       }
+
+      #${MARGIN_OVERLAY_ID} {
+        position: fixed !important;
+        pointer-events: none !important;
+        z-index: 999996 !important;
+        display: none !important;
+      }
+
+      #${MARGIN_OVERLAY_ID}.visible {
+        display: block !important;
+      }
+
+      .${MARGIN_OVERLAY_CLASS} {
+        position: fixed !important;
+        background-color: rgba(246, 178, 107, 0.3) !important;
+        pointer-events: none !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        z-index: 999995 !important;
+      }
+
+      #${CONTENT_OVERLAY_ID} {
+        position: fixed !important;
+        background-color: rgba(135, 171, 218, 0.3) !important;
+        pointer-events: none !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        z-index: 999994 !important;
+        display: none !important;
+      }
+
+      #${CONTENT_OVERLAY_ID}.visible {
+        display: block !important;
+      }
     `;
     document.head.appendChild(styleElement);
     console.log('[Scope] CSS injected');
@@ -137,6 +184,41 @@
     console.log('[Scope] Padding overlay created');
   }
 
+  // Create margin overlay container and parts
+  function createMarginOverlay() {
+    if (marginOverlayContainer) {
+      return; // Already created
+    }
+
+    marginOverlayContainer = document.createElement('div');
+    marginOverlayContainer.id = MARGIN_OVERLAY_ID;
+
+    // Create individual margin parts
+    ['top', 'right', 'bottom', 'left'].forEach(side => {
+      const marginPart = document.createElement('div');
+      marginPart.className = MARGIN_OVERLAY_CLASS;
+      marginPart.setAttribute('data-margin-side', side);
+      marginOverlayContainer.appendChild(marginPart);
+      marginOverlayParts[side] = marginPart;
+    });
+
+    document.body.appendChild(marginOverlayContainer);
+    console.log('[Scope] Margin overlay created');
+  }
+
+  // Create content overlay element
+  function createContentOverlay() {
+    if (contentOverlayElement) {
+      return; // Already created
+    }
+
+    contentOverlayElement = document.createElement('div');
+    contentOverlayElement.id = CONTENT_OVERLAY_ID;
+
+    document.body.appendChild(contentOverlayElement);
+    console.log('[Scope] Content overlay created');
+  }
+
   // Show overlay indicator
   function showOverlay() {
     if (overlayElement) {
@@ -167,6 +249,34 @@
     }
   }
 
+  // Show margin overlay
+  function showMarginOverlay() {
+    if (marginOverlayContainer) {
+      marginOverlayContainer.classList.add('visible');
+    }
+  }
+
+  // Hide margin overlay
+  function hideMarginOverlay() {
+    if (marginOverlayContainer) {
+      marginOverlayContainer.classList.remove('visible');
+    }
+  }
+
+  // Show content overlay
+  function showContentOverlay() {
+    if (contentOverlayElement) {
+      contentOverlayElement.classList.add('visible');
+    }
+  }
+
+  // Hide content overlay
+  function hideContentOverlay() {
+    if (contentOverlayElement) {
+      contentOverlayElement.classList.remove('visible');
+    }
+  }
+
   // Remove overlay and CSS
   function cleanup() {
     if (overlayElement && overlayElement.parentNode) {
@@ -182,6 +292,20 @@
         bottom: null,
         left: null,
       };
+    }
+    if (marginOverlayContainer && marginOverlayContainer.parentNode) {
+      marginOverlayContainer.parentNode.removeChild(marginOverlayContainer);
+      marginOverlayContainer = null;
+      marginOverlayParts = {
+        top: null,
+        right: null,
+        bottom: null,
+        left: null,
+      };
+    }
+    if (contentOverlayElement && contentOverlayElement.parentNode) {
+      contentOverlayElement.parentNode.removeChild(contentOverlayElement);
+      contentOverlayElement = null;
     }
     if (styleElement && styleElement.parentNode) {
       styleElement.parentNode.removeChild(styleElement);
@@ -397,6 +521,165 @@
     }
   }
 
+  // Update margin overlay positioning for element
+  function updateMarginOverlay(element) {
+    try {
+      if (
+        !element ||
+        !marginOverlayContainer ||
+        !isHighlightingEnabled ||
+        EXCLUDED_TAGS.includes(element.tagName)
+      ) {
+        return;
+      }
+
+      // Get element's bounding rectangle and computed styles
+      const rect = element.getBoundingClientRect();
+      const computedStyle = window.getComputedStyle(element);
+
+      // Parse margin values
+      const marginTop = parseFloat(computedStyle.marginTop) || 0;
+      const marginRight = parseFloat(computedStyle.marginRight) || 0;
+      const marginBottom = parseFloat(computedStyle.marginBottom) || 0;
+      const marginLeft = parseFloat(computedStyle.marginLeft) || 0;
+
+      // Skip if element has no margin
+      if (
+        marginTop === 0 &&
+        marginRight === 0 &&
+        marginBottom === 0 &&
+        marginLeft === 0
+      ) {
+        hideMarginOverlay();
+        return;
+      }
+
+      // Use viewport coordinates directly (no scroll offset needed for position: fixed)
+      const elementLeft = rect.left;
+      const elementTop = rect.top;
+      const elementWidth = rect.width;
+      const elementHeight = rect.height;
+
+      // Position top margin (above element)
+      if (marginTop > 0 && marginOverlayParts.top) {
+        marginOverlayParts.top.style.left = `${elementLeft - marginLeft}px`;
+        marginOverlayParts.top.style.top = `${elementTop - marginTop}px`;
+        marginOverlayParts.top.style.width = `${elementWidth + marginLeft + marginRight}px`;
+        marginOverlayParts.top.style.height = `${marginTop}px`;
+        marginOverlayParts.top.style.display = 'block';
+      } else if (marginOverlayParts.top) {
+        marginOverlayParts.top.style.display = 'none';
+      }
+
+      // Position right margin (to the right of element)
+      if (marginRight > 0 && marginOverlayParts.right) {
+        marginOverlayParts.right.style.left = `${elementLeft + elementWidth}px`;
+        marginOverlayParts.right.style.top = `${elementTop}px`;
+        marginOverlayParts.right.style.width = `${marginRight}px`;
+        marginOverlayParts.right.style.height = `${elementHeight}px`;
+        marginOverlayParts.right.style.display = 'block';
+      } else if (marginOverlayParts.right) {
+        marginOverlayParts.right.style.display = 'none';
+      }
+
+      // Position bottom margin (below element)
+      if (marginBottom > 0 && marginOverlayParts.bottom) {
+        marginOverlayParts.bottom.style.left = `${elementLeft - marginLeft}px`;
+        marginOverlayParts.bottom.style.top = `${elementTop + elementHeight}px`;
+        marginOverlayParts.bottom.style.width = `${elementWidth + marginLeft + marginRight}px`;
+        marginOverlayParts.bottom.style.height = `${marginBottom}px`;
+        marginOverlayParts.bottom.style.display = 'block';
+      } else if (marginOverlayParts.bottom) {
+        marginOverlayParts.bottom.style.display = 'none';
+      }
+
+      // Position left margin (to the left of element)
+      if (marginLeft > 0 && marginOverlayParts.left) {
+        marginOverlayParts.left.style.left = `${elementLeft - marginLeft}px`;
+        marginOverlayParts.left.style.top = `${elementTop}px`;
+        marginOverlayParts.left.style.width = `${marginLeft}px`;
+        marginOverlayParts.left.style.height = `${elementHeight}px`;
+        marginOverlayParts.left.style.display = 'block';
+      } else if (marginOverlayParts.left) {
+        marginOverlayParts.left.style.display = 'none';
+      }
+
+      // Show the overlay container
+      showMarginOverlay();
+
+      console.log('[Scope] Updated margin overlay for element:', {
+        selector: getElementSelector(element),
+        margin: {
+          top: marginTop,
+          right: marginRight,
+          bottom: marginBottom,
+          left: marginLeft,
+        },
+      });
+    } catch (error) {
+      console.error('[Scope] Error updating margin overlay:', error, element);
+      hideMarginOverlay();
+    }
+  }
+
+  // Update content overlay positioning for element
+  function updateContentOverlay(element) {
+    try {
+      if (
+        !element ||
+        !contentOverlayElement ||
+        !isHighlightingEnabled ||
+        EXCLUDED_TAGS.includes(element.tagName)
+      ) {
+        return;
+      }
+
+      // Get element's bounding rectangle and computed styles
+      const rect = element.getBoundingClientRect();
+      const computedStyle = window.getComputedStyle(element);
+
+      // Parse padding values
+      const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
+      const paddingRight = parseFloat(computedStyle.paddingRight) || 0;
+      const paddingBottom = parseFloat(computedStyle.paddingBottom) || 0;
+      const paddingLeft = parseFloat(computedStyle.paddingLeft) || 0;
+
+      // Calculate content area (inside padding)
+      const contentLeft = rect.left + paddingLeft;
+      const contentTop = rect.top + paddingTop;
+      const contentWidth = rect.width - paddingLeft - paddingRight;
+      const contentHeight = rect.height - paddingTop - paddingBottom;
+
+      // Skip if content area has no dimensions
+      if (contentWidth <= 0 || contentHeight <= 0) {
+        hideContentOverlay();
+        return;
+      }
+
+      // Position content overlay
+      contentOverlayElement.style.left = `${contentLeft}px`;
+      contentOverlayElement.style.top = `${contentTop}px`;
+      contentOverlayElement.style.width = `${contentWidth}px`;
+      contentOverlayElement.style.height = `${contentHeight}px`;
+
+      // Show the overlay
+      showContentOverlay();
+
+      console.log('[Scope] Updated content overlay for element:', {
+        selector: getElementSelector(element),
+        content: {
+          left: contentLeft,
+          top: contentTop,
+          width: contentWidth,
+          height: contentHeight,
+        },
+      });
+    } catch (error) {
+      console.error('[Scope] Error updating content overlay:', error, element);
+      hideContentOverlay();
+    }
+  }
+
   // Add highlight to element
   function highlightElement(element) {
     try {
@@ -447,6 +730,12 @@
       // Show padding visualization for current element
       updatePaddingOverlay(element);
 
+      // Show margin visualization for current element
+      updateMarginOverlay(element);
+
+      // Show content visualization for current element
+      updateContentOverlay(element);
+
       previousElement = element;
     } catch (error) {
       console.error('[Scope] Error highlighting element:', error, element);
@@ -466,6 +755,12 @@
 
       // Hide padding overlay
       hidePaddingOverlay();
+
+      // Hide margin overlay
+      hideMarginOverlay();
+
+      // Hide content overlay
+      hideContentOverlay();
 
       if (previousElement === element) {
         previousElement = null;
@@ -487,6 +782,12 @@
 
       // Hide padding overlay
       hidePaddingOverlay();
+
+      // Hide margin overlay
+      hideMarginOverlay();
+
+      // Hide content overlay
+      hideContentOverlay();
 
       previousElement = null;
       console.log('[Scope] Removed all highlights from page');
@@ -606,6 +907,8 @@
       removeAllHighlights();
       hideOverlay();
       hidePaddingOverlay();
+      hideMarginOverlay();
+      hideContentOverlay();
       console.log('[Scope] Highlighting disabled');
     }
   }
@@ -632,6 +935,8 @@
     injectCSS();
     createOverlay();
     createPaddingOverlay();
+    createMarginOverlay();
+    createContentOverlay();
     attachEventListeners();
 
     // Start dormant - don't read from storage
@@ -646,6 +951,8 @@
       removeHighlight(previousElement);
     }
     hidePaddingOverlay();
+    hideMarginOverlay();
+    hideContentOverlay();
     removeEventListeners();
     cleanup();
     console.log('[Scope] Cleaned up before page unload');
