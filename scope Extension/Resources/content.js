@@ -12,6 +12,7 @@
   const GAP_OVERLAY_CLASS = 'scope-gap-overlay-part';
   const REFERENCE_LINES_ID = 'scope-reference-lines';
   const REFERENCE_LINE_CLASS = 'scope-reference-line';
+  const ENABLE_REFERENCE_LINES = false;
   const REFERENCE_LINE_THICKNESS = Math.min(
     0.75,
     1 / (window.devicePixelRatio || 1)
@@ -72,6 +73,72 @@
     rafScheduled = false;
   }
 
+  function ensureReferenceLinesRoot() {
+    if (!ENABLE_REFERENCE_LINES) {
+      return null;
+    }
+
+    if (referenceLinesRoot) {
+      return referenceLinesRoot;
+    }
+
+    referenceLinesHost = document.createElement('div');
+    referenceLinesHost.id = `${REFERENCE_LINES_ID}-host`;
+    referenceLinesHost.setAttribute('aria-hidden', 'true');
+    referenceLinesHost.style.setProperty('position', 'fixed', 'important');
+    referenceLinesHost.style.setProperty('inset', '0', 'important');
+    referenceLinesHost.style.setProperty('width', '100vw', 'important');
+    referenceLinesHost.style.setProperty('height', '100vh', 'important');
+    referenceLinesHost.style.setProperty('pointer-events', 'none', 'important');
+    referenceLinesHost.style.setProperty('z-index', '2147483646', 'important');
+    referenceLinesHost.style.setProperty('contain', 'layout style paint', 'important');
+    referenceLinesHost.style.setProperty('transform', 'none', 'important');
+
+    const root = referenceLinesHost.attachShadow
+      ? referenceLinesHost.attachShadow({ mode: 'open' })
+      : referenceLinesHost;
+
+    if (root !== referenceLinesHost) {
+      const shadowStyle = document.createElement('style');
+      shadowStyle.textContent = `
+        :host {
+          position: fixed;
+          inset: 0;
+          pointer-events: none;
+          display: block;
+          z-index: 2147483646;
+        }
+
+        #${REFERENCE_LINES_ID} {
+          position: fixed;
+          pointer-events: none;
+          display: none;
+          inset: 0;
+        }
+
+        #${REFERENCE_LINES_ID}.visible {
+          display: block;
+        }
+
+        .${REFERENCE_LINE_CLASS} {
+          position: fixed;
+          background-color: #ff4444;
+          pointer-events: none;
+          border: none;
+          margin: 0;
+          padding: 0;
+        }
+      `;
+
+      root.appendChild(shadowStyle);
+    }
+
+    const hostParent = document.documentElement || document.body || document;
+    hostParent.appendChild(referenceLinesHost);
+    referenceLinesRoot = root;
+    return referenceLinesRoot;
+  }
+
   const EXCLUDED_TAGS = [
     'HTML',
     'BODY',
@@ -117,6 +184,8 @@
   let gapOverlayParts = [];
 
   // Reference lines elements - L-corner segments
+  let referenceLinesHost = null;
+  let referenceLinesRoot = null;
   let referenceLinesContainer = null;
   let referenceLinesElements = {
     topLeftHorizontal: null, // From viewport left edge TO element left
@@ -196,7 +265,8 @@
     }
 
     styleElement = document.createElement('style');
-    styleElement.textContent = `
+    const referenceLinesCSS = ENABLE_REFERENCE_LINES
+      ? `
       #${REFERENCE_LINES_ID} {
         position: fixed !important;
         pointer-events: none !important;
@@ -217,6 +287,11 @@
         padding: 0 !important;
         z-index: 999999 !important;
       }
+    `
+      : '';
+
+    styleElement.textContent = `
+      ${referenceLinesCSS}
 
       #${OVERLAY_ID} {
         position: fixed !important;
@@ -416,8 +491,17 @@
 
   // Create reference lines container and elements
   function createReferenceLines() {
+    if (!ENABLE_REFERENCE_LINES) {
+      return;
+    }
+
     if (referenceLinesContainer) {
       return; // Already created
+    }
+
+    const root = ensureReferenceLinesRoot();
+    if (!root) {
+      return;
     }
 
     // Create container
@@ -444,7 +528,7 @@
       referenceLinesElements[segmentName] = line;
     });
 
-    document.body.appendChild(referenceLinesContainer);
+    root.appendChild(referenceLinesContainer);
     debugLog('[Scope] L-corner reference lines created');
   }
 
@@ -527,16 +611,20 @@
 
   // Show reference lines
   function showReferenceLines() {
-    if (referenceLinesContainer) {
-      referenceLinesContainer.classList.add('visible');
+    if (!ENABLE_REFERENCE_LINES || !referenceLinesContainer) {
+      return;
     }
+
+    referenceLinesContainer.classList.add('visible');
   }
 
   // Hide reference lines
   function hideReferenceLines() {
-    if (referenceLinesContainer) {
-      referenceLinesContainer.classList.remove('visible');
+    if (!referenceLinesContainer) {
+      return;
     }
+
+    referenceLinesContainer.classList.remove('visible');
   }
 
   // Remove overlay and CSS
@@ -576,18 +664,23 @@
     }
     if (referenceLinesContainer && referenceLinesContainer.parentNode) {
       referenceLinesContainer.parentNode.removeChild(referenceLinesContainer);
-      referenceLinesContainer = null;
-      referenceLinesElements = {
-        topLeftHorizontal: null,
-        topLeftVertical: null,
-        topRightHorizontal: null,
-        topRightVertical: null,
-        bottomLeftHorizontal: null,
-        bottomLeftVertical: null,
-        bottomRightHorizontal: null,
-        bottomRightVertical: null,
-      };
     }
+    if (referenceLinesHost && referenceLinesHost.parentNode) {
+      referenceLinesHost.parentNode.removeChild(referenceLinesHost);
+    }
+    referenceLinesContainer = null;
+    referenceLinesRoot = null;
+    referenceLinesHost = null;
+    referenceLinesElements = {
+      topLeftHorizontal: null,
+      topLeftVertical: null,
+      topRightHorizontal: null,
+      topRightVertical: null,
+      bottomLeftHorizontal: null,
+      bottomLeftVertical: null,
+      bottomRightHorizontal: null,
+      bottomRightVertical: null,
+    };
     if (styleElement && styleElement.parentNode) {
       styleElement.parentNode.removeChild(styleElement);
       styleElement = null;
@@ -652,6 +745,10 @@
   // Update reference lines to show L-corner indicators extending to viewport edges
   function updateReferenceLines(element) {
     try {
+      if (!ENABLE_REFERENCE_LINES) {
+        return;
+      }
+
       if (
         !element ||
         !referenceLinesContainer ||
@@ -1427,8 +1524,10 @@
         return;
       }
 
-      // Create reference lines if not already created
-      createReferenceLines();
+      // Create reference lines if enabled
+      if (ENABLE_REFERENCE_LINES) {
+        createReferenceLines();
+      }
 
       // Log element being highlighted
       debugLog('[Scope] Highlighted element:', {
@@ -1440,7 +1539,9 @@
       });
 
       // Show reference lines for current element
-      updateReferenceLines(element);
+      if (ENABLE_REFERENCE_LINES) {
+        updateReferenceLines(element);
+      }
 
       // Show padding visualization for current element
       updatePaddingOverlay(element);
