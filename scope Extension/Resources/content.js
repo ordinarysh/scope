@@ -91,7 +91,11 @@
     referenceLinesHost.style.setProperty('height', '100vh', 'important');
     referenceLinesHost.style.setProperty('pointer-events', 'none', 'important');
     referenceLinesHost.style.setProperty('z-index', '2147483646', 'important');
-    referenceLinesHost.style.setProperty('contain', 'layout style paint', 'important');
+    referenceLinesHost.style.setProperty(
+      'contain',
+      'layout style paint',
+      'important'
+    );
     referenceLinesHost.style.setProperty('transform', 'none', 'important');
 
     const root = referenceLinesHost.attachShadow
@@ -1285,6 +1289,13 @@
       return results;
     }
 
+    // Get container padding to properly calculate content area
+    const containerStyle = window.getComputedStyle(element);
+    const paddingTop = parseFloat(containerStyle.paddingTop) || 0;
+    const paddingRight = parseFloat(containerStyle.paddingRight) || 0;
+    const paddingBottom = parseFloat(containerStyle.paddingBottom) || 0;
+    const paddingLeft = parseFloat(containerStyle.paddingLeft) || 0;
+
     const childCount = element.children.length;
     if (childCount < 2 || childCount > MAX_GAP_CHILDREN) {
       return results;
@@ -1323,9 +1334,6 @@
       return results;
     }
 
-    const containerRight = containerRect.left + containerRect.width;
-    const containerBottom = containerRect.top + containerRect.height;
-
     if (hasColumnGap) {
       const columnGroups = groupRectsByAxis(childRects, 'column').sort(
         (a, b) => a.minLeft - b.minLeft
@@ -1340,28 +1348,23 @@
           continue;
         }
 
-        const overlapTop = Math.max(prev.minTop, curr.minTop);
-        const overlapBottom = Math.min(prev.maxBottom, curr.maxBottom);
-        const verticalOverlap = overlapBottom - overlapTop;
-
-        if (verticalOverlap <= GAP_EPSILON) {
-          continue;
-        }
-
         const targetWidth = Math.min(columnGap, spaceWidth);
         const centeredLeft =
           prev.maxRight + Math.max((spaceWidth - targetWidth) / 2, 0);
-        const left = Math.max(containerRect.left, centeredLeft);
-        const right = Math.min(containerRight, left + targetWidth);
+        const left = Math.max(containerRect.left + paddingLeft, centeredLeft);
+        const right = Math.min(
+          containerRect.left + containerRect.width - paddingRight,
+          left + targetWidth
+        );
         const width = right - left;
 
         if (width <= GAP_EPSILON) {
           continue;
         }
 
-        const top = Math.max(containerRect.top, overlapTop);
-        const bottom = Math.min(containerBottom, overlapBottom);
-        const height = bottom - top;
+        // Span full content height (inside padding)
+        const top = containerRect.top + paddingTop;
+        const height = containerRect.height - paddingTop - paddingBottom;
 
         if (height <= GAP_EPSILON) {
           continue;
@@ -1385,28 +1388,23 @@
           continue;
         }
 
-        const overlapLeft = Math.max(prev.minLeft, curr.minLeft);
-        const overlapRight = Math.min(prev.maxRight, curr.maxRight);
-        const horizontalOverlap = overlapRight - overlapLeft;
-
-        if (horizontalOverlap <= GAP_EPSILON) {
-          continue;
-        }
-
         const targetHeight = Math.min(rowGap, spaceHeight);
         const centeredTop =
           prev.maxBottom + Math.max((spaceHeight - targetHeight) / 2, 0);
-        const top = Math.max(containerRect.top, centeredTop);
-        const bottom = Math.min(containerBottom, top + targetHeight);
+        const top = Math.max(containerRect.top + paddingTop, centeredTop);
+        const bottom = Math.min(
+          containerRect.top + containerRect.height - paddingBottom,
+          top + targetHeight
+        );
         const height = bottom - top;
 
         if (height <= GAP_EPSILON) {
           continue;
         }
 
-        const left = Math.max(containerRect.left, overlapLeft);
-        const right = Math.min(containerRight, overlapRight);
-        const width = right - left;
+        // Span full content width (inside padding)
+        const left = containerRect.left + paddingLeft;
+        const width = containerRect.width - paddingLeft - paddingRight;
 
         if (width <= GAP_EPSILON) {
           continue;
