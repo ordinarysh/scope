@@ -8,8 +8,13 @@
   const MARGIN_OVERLAY_ID = 'scope-margin-overlay';
   const MARGIN_OVERLAY_CLASS = 'scope-margin-overlay-part';
   const CONTENT_OVERLAY_ID = 'scope-content-overlay';
+  const GAP_OVERLAY_ID = 'scope-gap-overlay';
+  const GAP_OVERLAY_CLASS = 'scope-gap-overlay-part';
   const REFERENCE_LINES_ID = 'scope-reference-lines';
   const REFERENCE_LINE_CLASS = 'scope-reference-line';
+  const REFERENCE_LINE_THICKNESS = Math.min(0.75, 1 / (window.devicePixelRatio || 1));
+  const REFERENCE_LINE_THICKNESS_PX = `${REFERENCE_LINE_THICKNESS}px`;
+  const MAX_GAP_CHILDREN = 200;
 
   // Performance optimization: Debug mode toggle
   const DEBUG_MODE = false; // Set to true only during development
@@ -97,6 +102,8 @@
     left: null,
   };
   let contentOverlayElement = null;
+  let gapOverlayContainer = null;
+  let gapOverlayParts = [];
 
   // Reference lines elements
   let referenceLinesContainer = null;
@@ -120,6 +127,17 @@
       const rect = element.getBoundingClientRect();
       const style = window.getComputedStyle(element);
 
+      const paddingTop = parseFloat(style.paddingTop) || 0;
+      const paddingRight = parseFloat(style.paddingRight) || 0;
+      const paddingBottom = parseFloat(style.paddingBottom) || 0;
+      const paddingLeft = parseFloat(style.paddingLeft) || 0;
+      const marginTop = parseFloat(style.marginTop) || 0;
+      const marginRight = parseFloat(style.marginRight) || 0;
+      const marginBottom = parseFloat(style.marginBottom) || 0;
+      const marginLeft = parseFloat(style.marginLeft) || 0;
+      const rowGap = parseFloat(style.rowGap) || 0;
+      const columnGap = parseFloat(style.columnGap) || 0;
+
       cachedStyles.set(element, {
         rect: {
           left: rect.left,
@@ -128,16 +146,23 @@
           height: rect.height,
         },
         padding: {
-          top: parseFloat(style.paddingTop) || 0,
-          right: parseFloat(style.paddingRight) || 0,
-          bottom: parseFloat(style.paddingBottom) || 0,
-          left: parseFloat(style.paddingLeft) || 0,
+          top: paddingTop,
+          right: paddingRight,
+          bottom: paddingBottom,
+          left: paddingLeft,
         },
         margin: {
-          top: parseFloat(style.marginTop) || 0,
-          right: parseFloat(style.marginRight) || 0,
-          bottom: parseFloat(style.marginBottom) || 0,
-          left: parseFloat(style.marginLeft) || 0,
+          top: marginTop,
+          right: marginRight,
+          bottom: marginBottom,
+          left: marginLeft,
+        },
+        layout: {
+          display: style.display || '',
+          flexDirection: style.flexDirection || '',
+          flexWrap: style.flexWrap || '',
+          rowGap,
+          columnGap,
         },
       });
     }
@@ -258,6 +283,34 @@
       #${CONTENT_OVERLAY_ID}.visible {
         display: block !important;
       }
+
+      #${GAP_OVERLAY_ID} {
+        position: fixed !important;
+        pointer-events: none !important;
+        z-index: 999997 !important;
+        display: none !important;
+      }
+
+      #${GAP_OVERLAY_ID}.visible {
+        display: block !important;
+      }
+
+      .${GAP_OVERLAY_CLASS} {
+        position: fixed !important;
+        pointer-events: none !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        z-index: 999996 !important;
+        background-color: rgba(189, 47, 255, 0.35) !important;
+        background-image: repeating-linear-gradient(
+          135deg,
+          rgba(189, 47, 255, 0.5) 0px,
+          rgba(189, 47, 255, 0.5) 6px,
+          rgba(189, 47, 255, 0.2) 6px,
+          rgba(189, 47, 255, 0.2) 12px
+        ) !important;
+      }
     `;
     document.head.appendChild(styleElement);
     debugLog('[Scope] CSS injected');
@@ -331,6 +384,19 @@
 
     document.body.appendChild(contentOverlayElement);
     debugLog('[Scope] Content overlay created');
+  }
+
+  // Create gap overlay container
+  function createGapOverlay() {
+    if (gapOverlayContainer) {
+      return; // Already created
+    }
+
+    gapOverlayContainer = document.createElement('div');
+    gapOverlayContainer.id = GAP_OVERLAY_ID;
+    document.body.appendChild(gapOverlayContainer);
+    gapOverlayParts = [];
+    debugLog('[Scope] Gap overlay created');
   }
 
   // Create reference lines container and elements
@@ -414,6 +480,25 @@
     }
   }
 
+  // Show gap overlay container
+  function showGapOverlay() {
+    if (gapOverlayContainer) {
+      gapOverlayContainer.classList.add('visible');
+    }
+  }
+
+  // Hide gap overlay and any rendered parts
+  function hideGapOverlay() {
+    if (gapOverlayContainer) {
+      gapOverlayContainer.classList.remove('visible');
+    }
+    for (const part of gapOverlayParts) {
+      if (part) {
+        batchDOMUpdate(part, { display: 'none' });
+      }
+    }
+  }
+
   // Show reference lines
   function showReferenceLines() {
     if (referenceLinesContainer) {
@@ -453,6 +538,11 @@
         bottom: null,
         left: null,
       };
+    }
+    if (gapOverlayContainer && gapOverlayContainer.parentNode) {
+      gapOverlayContainer.parentNode.removeChild(gapOverlayContainer);
+      gapOverlayContainer = null;
+      gapOverlayParts = [];
     }
     if (contentOverlayElement && contentOverlayElement.parentNode) {
       contentOverlayElement.parentNode.removeChild(contentOverlayElement);
@@ -551,7 +641,7 @@
           left: '0px',
           top: `${rect.top}px`,
           width: '100vw',
-          height: '1px',
+          height: REFERENCE_LINE_THICKNESS_PX,
         });
       }
 
@@ -561,7 +651,7 @@
           left: '0px',
           top: `${rect.top + rect.height}px`,
           width: '100vw',
-          height: '1px',
+          height: REFERENCE_LINE_THICKNESS_PX,
         });
       }
 
@@ -570,7 +660,7 @@
         batchDOMUpdate(referenceLinesElements.left, {
           left: `${rect.left}px`,
           top: '0px',
-          width: '1px',
+          width: REFERENCE_LINE_THICKNESS_PX,
           height: '100vh',
         });
       }
@@ -580,7 +670,7 @@
         batchDOMUpdate(referenceLinesElements.right, {
           left: `${rect.left + rect.width}px`,
           top: '0px',
-          width: '1px',
+          width: REFERENCE_LINE_THICKNESS_PX,
           height: '100vh',
         });
       }
@@ -880,6 +970,234 @@
     }
   }
 
+  function ensureGapOverlayParts(count) {
+    if (!gapOverlayContainer) {
+      return;
+    }
+
+    while (gapOverlayParts.length < count) {
+      const part = document.createElement('div');
+      part.className = GAP_OVERLAY_CLASS;
+      gapOverlayContainer.appendChild(part);
+      gapOverlayParts.push(part);
+    }
+  }
+
+  function computeGapRectangles(element, containerRect, layout) {
+    const results = [];
+
+    if (!element || !containerRect || !layout) {
+      return results;
+    }
+
+    const { rowGap = 0, columnGap = 0 } = layout;
+    const hasRowGap = rowGap > 0;
+    const hasColumnGap = columnGap > 0;
+
+    if (!hasRowGap && !hasColumnGap) {
+      return results;
+    }
+
+    const childCount = element.children.length;
+    if (childCount < 2 || childCount > MAX_GAP_CHILDREN) {
+      return results;
+    }
+
+    const childRects = [];
+    for (const child of element.children) {
+      if (!(child instanceof Element)) {
+        continue;
+      }
+
+      if (
+        child.id === OVERLAY_ID ||
+        child.id === PADDING_OVERLAY_ID ||
+        child.id === MARGIN_OVERLAY_ID ||
+        child.id === CONTENT_OVERLAY_ID ||
+        child.id === GAP_OVERLAY_ID ||
+        child.id === REFERENCE_LINES_ID ||
+        child.classList.contains(PADDING_OVERLAY_CLASS) ||
+        child.classList.contains(MARGIN_OVERLAY_CLASS) ||
+        child.classList.contains(GAP_OVERLAY_CLASS) ||
+        child.classList.contains(REFERENCE_LINE_CLASS)
+      ) {
+        continue;
+      }
+
+      const rect = child.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        continue;
+      }
+
+      childRects.push(rect);
+    }
+
+    if (childRects.length < 2) {
+      return results;
+    }
+
+    const containerRight = containerRect.left + containerRect.width;
+    const containerBottom = containerRect.top + containerRect.height;
+    const EPSILON = 0.5;
+
+    if (hasColumnGap) {
+      const sortedByX = childRects.slice().sort((a, b) => a.left - b.left);
+
+      for (let index = 1; index < sortedByX.length; index += 1) {
+        const prevRect = sortedByX[index - 1];
+        const currRect = sortedByX[index];
+        const spaceWidth = currRect.left - prevRect.right;
+
+        if (spaceWidth <= EPSILON) {
+          continue;
+        }
+
+        const overlapTop = Math.max(prevRect.top, currRect.top);
+        const overlapBottom = Math.min(prevRect.bottom, currRect.bottom);
+        const verticalOverlap = overlapBottom - overlapTop;
+
+        if (verticalOverlap <= EPSILON) {
+          continue;
+        }
+
+        const targetWidth = Math.min(columnGap, spaceWidth);
+        const centeredLeft = prevRect.right + Math.max((spaceWidth - targetWidth) / 2, 0);
+        const left = Math.max(containerRect.left, centeredLeft);
+        const right = Math.min(containerRight, centeredLeft + targetWidth);
+        const width = right - left;
+
+        if (width <= EPSILON) {
+          continue;
+        }
+
+        const top = Math.max(containerRect.top, overlapTop);
+        const bottom = Math.min(containerBottom, overlapBottom);
+        const height = bottom - top;
+
+        if (height <= EPSILON) {
+          continue;
+        }
+
+        results.push({ left, top, width, height });
+      }
+    }
+
+    if (hasRowGap) {
+      const sortedByY = childRects.slice().sort((a, b) => a.top - b.top);
+
+      for (let index = 1; index < sortedByY.length; index += 1) {
+        const prevRect = sortedByY[index - 1];
+        const currRect = sortedByY[index];
+        const spaceHeight = currRect.top - prevRect.bottom;
+
+        if (spaceHeight <= EPSILON) {
+          continue;
+        }
+
+        const overlapLeft = Math.max(prevRect.left, currRect.left);
+        const overlapRight = Math.min(prevRect.right, currRect.right);
+        const horizontalOverlap = overlapRight - overlapLeft;
+
+        if (horizontalOverlap <= EPSILON) {
+          continue;
+        }
+
+        const targetHeight = Math.min(rowGap, spaceHeight);
+        const centeredTop = prevRect.bottom + Math.max((spaceHeight - targetHeight) / 2, 0);
+        const top = Math.max(containerRect.top, centeredTop);
+        const bottom = Math.min(containerBottom, centeredTop + targetHeight);
+        const height = bottom - top;
+
+        if (height <= EPSILON) {
+          continue;
+        }
+
+        const left = Math.max(containerRect.left, overlapLeft);
+        const right = Math.min(containerRight, overlapRight);
+        const width = right - left;
+
+        if (width <= EPSILON) {
+          continue;
+        }
+
+        results.push({ left, top, width, height });
+      }
+    }
+
+    return results;
+  }
+
+  function updateGapOverlay(element) {
+    try {
+      if (
+        !element ||
+        !gapOverlayContainer ||
+        !isHighlightingEnabled ||
+        EXCLUDED_TAGS.includes(element.tagName)
+      ) {
+        return;
+      }
+
+      const cached = getCachedStyles(element);
+      const { rect, layout } = cached;
+
+      if (!layout) {
+        hideGapOverlay();
+        return;
+      }
+
+      const { display = '', rowGap = 0, columnGap = 0 } = layout;
+      const supportsGapHighlight =
+        display.includes('grid') || display.includes('flex');
+
+      if (!supportsGapHighlight || (rowGap <= 0 && columnGap <= 0)) {
+        hideGapOverlay();
+        return;
+      }
+
+      const gapRects = computeGapRectangles(element, rect, layout);
+
+      if (gapRects.length === 0) {
+        hideGapOverlay();
+        return;
+      }
+
+      ensureGapOverlayParts(gapRects.length);
+
+      gapRects.forEach((gapRect, index) => {
+        const part = gapOverlayParts[index];
+        if (!part) {
+          return;
+        }
+
+        batchDOMUpdate(part, {
+          left: `${gapRect.left}px`,
+          top: `${gapRect.top}px`,
+          width: `${gapRect.width}px`,
+          height: `${gapRect.height}px`,
+          display: 'block',
+        });
+      });
+
+      for (let index = gapRects.length; index < gapOverlayParts.length; index += 1) {
+        const part = gapOverlayParts[index];
+        if (part) {
+          batchDOMUpdate(part, { display: 'none' });
+        }
+      }
+
+      showGapOverlay();
+
+      debugLog('[Scope] Updated gap overlay for element:', {
+        selector: getElementSelector(element),
+        gapRects,
+      });
+    } catch (error) {
+      console.error('[Scope] Error updating gap overlay:', error, element);
+      hideGapOverlay();
+    }
+  }
+
   // Add highlight to element
   function highlightElement(element) {
     try {
@@ -895,8 +1213,10 @@
       if (
         element.id === OVERLAY_ID ||
         element.id === PADDING_OVERLAY_ID ||
+        element.id === GAP_OVERLAY_ID ||
         element.id === REFERENCE_LINES_ID ||
         element.classList.contains(PADDING_OVERLAY_CLASS) ||
+        element.classList.contains(GAP_OVERLAY_CLASS) ||
         element.classList.contains(REFERENCE_LINE_CLASS)
       ) {
         return;
@@ -932,6 +1252,9 @@
       // Show content visualization for current element
       updateContentOverlay(element);
 
+      // Show gap visualization for current element
+      updateGapOverlay(element);
+
       previousElement = element;
     } catch (error) {
       console.error('[Scope] Error highlighting element:', error, element);
@@ -957,6 +1280,9 @@
       // Hide content overlay
       hideContentOverlay();
 
+      // Hide gap overlay
+      hideGapOverlay();
+
       if (previousElement === element) {
         previousElement = null;
       }
@@ -980,6 +1306,9 @@
       // Hide content overlay
       hideContentOverlay();
 
+      // Hide gap overlay
+      hideGapOverlay();
+
       previousElement = null;
       console.log('[Scope] Removed all highlights from page');
     } catch (error) {
@@ -999,7 +1328,9 @@
       EXCLUDED_TAGS.includes(element.tagName) ||
       element.id === OVERLAY_ID ||
       element.id === PADDING_OVERLAY_ID ||
-      element.classList.contains(PADDING_OVERLAY_CLASS)
+      element.id === GAP_OVERLAY_ID ||
+      element.classList.contains(PADDING_OVERLAY_CLASS) ||
+      element.classList.contains(GAP_OVERLAY_CLASS)
     ) {
       return;
     }
@@ -1027,7 +1358,9 @@
     if (
       element.id === OVERLAY_ID ||
       element.id === PADDING_OVERLAY_ID ||
-      element.classList.contains(PADDING_OVERLAY_CLASS)
+      element.id === GAP_OVERLAY_ID ||
+      element.classList.contains(PADDING_OVERLAY_CLASS) ||
+      element.classList.contains(GAP_OVERLAY_CLASS)
     ) {
       return;
     }
@@ -1045,7 +1378,9 @@
       if (
         event.target.id === OVERLAY_ID ||
         event.target.id === PADDING_OVERLAY_ID ||
-        event.target.classList.contains(PADDING_OVERLAY_CLASS)
+        event.target.id === GAP_OVERLAY_ID ||
+        event.target.classList.contains(PADDING_OVERLAY_CLASS) ||
+        event.target.classList.contains(GAP_OVERLAY_CLASS)
       ) {
         return;
       }
@@ -1078,6 +1413,7 @@
     updatePaddingOverlay(previousElement);
     updateMarginOverlay(previousElement);
     updateContentOverlay(previousElement);
+    updateGapOverlay(previousElement);
   }
 
   // Handle resize to invalidate cached styles
@@ -1095,6 +1431,7 @@
       updatePaddingOverlay(previousElement);
       updateMarginOverlay(previousElement);
       updateContentOverlay(previousElement);
+      updateGapOverlay(previousElement);
     }
   }
 
@@ -1149,6 +1486,7 @@
       hidePaddingOverlay();
       hideMarginOverlay();
       hideContentOverlay();
+      hideGapOverlay();
       console.log('[Scope] Highlighting disabled');
     }
   }
@@ -1177,6 +1515,7 @@
     createPaddingOverlay();
     createMarginOverlay();
     createContentOverlay();
+    createGapOverlay();
     attachEventListeners();
 
     // Start dormant - don't read from storage
@@ -1193,6 +1532,7 @@
     hidePaddingOverlay();
     hideMarginOverlay();
     hideContentOverlay();
+    hideGapOverlay();
     removeEventListeners();
     cleanup();
     console.log('[Scope] Cleaned up before page unload');
